@@ -2,8 +2,12 @@
 /**
  * OptiMax Offline Scanner - Simulated market data with Black-Scholes pricing
  * Scans US & SGX markets for max-gain option trades
+ *
+ * DISCLAIMER: This uses SIMULATED data based on Black-Scholes pricing models.
+ * Prices are NOT live quotes. Always verify with your broker before trading.
  */
 const fs = require('fs');
+const SCAN_DATE = '2026-04-08'; // Simulated scan date
 
 // ===== Black-Scholes =====
 function normCDF(x) {
@@ -128,6 +132,18 @@ function main() {
             const targetUp = price + 1.5 * sigmaMove;   // 1.5 sigma up
             const targetDown = price - 1.5 * sigmaMove;  // 1.5 sigma down
 
+            // Bid/ask spread simulation (tighter for liquid stocks)
+            const spreadPct = volMult > 5 ? 0.02 : (volMult > 2 ? 0.04 : 0.08);
+
+            // Helper: build trade setup fields
+            function tradeSetup(premium, stopPct) {
+                const bid = +(premium * (1 - spreadPct/2)).toFixed(2);
+                const ask = +(premium * (1 + spreadPct/2)).toFixed(2);
+                const mid = +(premium).toFixed(2);
+                const stopLoss = +(premium * (1 - stopPct)).toFixed(2); // exit at this option price
+                return { entryDate: SCAN_DATE, bid, ask, entryPrice: mid, stopLoss };
+            }
+
             // ===== Long Call (OTM calls) =====
             for (let i = atmIdx; i < chain.length; i++) {
                 const c = chain[i];
@@ -135,18 +151,24 @@ function main() {
                 if (premium < 0.10) continue;
                 const cost = premium * 100;
                 const breakeven = c.K + premium;
-                if (targetUp <= breakeven) continue; // target doesn't reach breakeven
+                if (targetUp <= breakeven) continue;
                 const targetGain = (targetUp - c.K - premium) * 100;
                 if (targetGain <= 0) continue;
                 const gainPct = (targetGain / cost) * 100;
                 if (gainPct < 10) continue;
                 const rr = targetGain / cost;
                 const s = score('Long Call', rr, gainPct, ivRank, c.vol, c.oi, dte);
+                const ts = tradeSetup(premium, 0.50);
+                const tgtPrice = +(premium * (1 + gainPct/100 * 0.5)).toFixed(2); // target 50% of max
                 results.push({
                     ticker, market, stockPrice:price, strategy:'Long Call', strike:c.K.toFixed(2),
                     expiry:expiryStr, dte, premium:premium.toFixed(2), maxGainPct:gainPct.toFixed(1),
                     maxLoss:cost.toFixed(0), breakeven:breakeven.toFixed(2), iv:(c.iv*100).toFixed(1),
-                    ivRank, volume:c.vol, oi:c.oi, riskReward:rr.toFixed(2), score:s
+                    ivRank, volume:c.vol, oi:c.oi, riskReward:rr.toFixed(2), score:s,
+                    entryDate:ts.entryDate, bid:ts.bid, ask:ts.ask, entryPrice:ts.entryPrice,
+                    targetStockPrice:targetUp.toFixed(2), targetOptionPrice:tgtPrice,
+                    stopLoss:ts.stopLoss,
+                    action:`BUY ${c.K.toFixed(0)} CALL @ $${ts.entryPrice} (ask $${ts.ask}), stop $${ts.stopLoss}, target $${tgtPrice}`
                 });
             }
 
@@ -157,21 +179,27 @@ function main() {
                 if (premium < 0.10) continue;
                 const cost = premium * 100;
                 const breakeven = c.K - premium;
-                if (targetDown >= breakeven) continue; // target doesn't reach breakeven
+                if (targetDown >= breakeven) continue;
                 const targetGainVal = (c.K - premium - Math.max(0, targetDown)) * 100;
                 if (targetGainVal <= 0) continue;
                 const gainPct = (targetGainVal / cost) * 100;
                 if (gainPct < 10) continue;
                 const rr = targetGainVal / cost;
                 const s = score('Long Put', rr, gainPct, ivRank, c.vol, c.oi, dte);
+                const ts = tradeSetup(premium, 0.50);
+                const tgtPrice = +(premium * (1 + gainPct/100 * 0.5)).toFixed(2);
                 results.push({
                     ticker, market, stockPrice:price, strategy:'Long Put', strike:c.K.toFixed(2),
                     expiry:expiryStr, dte, premium:premium.toFixed(2), maxGainPct:gainPct.toFixed(1),
                     maxLoss:cost.toFixed(0), breakeven:breakeven.toFixed(2), iv:(c.iv*100).toFixed(1),
-                    ivRank, volume:c.vol, oi:c.oi, riskReward:rr.toFixed(2), score:s
+                    ivRank, volume:c.vol, oi:c.oi, riskReward:rr.toFixed(2), score:s,
+                    entryDate:ts.entryDate, bid:ts.bid, ask:ts.ask, entryPrice:ts.entryPrice,
+                    targetStockPrice:targetDown.toFixed(2), targetOptionPrice:tgtPrice,
+                    stopLoss:ts.stopLoss,
+                    action:`BUY ${c.K.toFixed(0)} PUT @ $${ts.entryPrice} (ask $${ts.ask}), stop $${ts.stopLoss}, target $${tgtPrice}`
                 });
             }
-            
+
             // ===== Bull Call Spread (ATM long, 5% OTM short) =====
             const otmCallIdx = strikePcts.indexOf(1.05);
             if (otmCallIdx >= 0 && atmIdx >= 0) {
@@ -186,18 +214,24 @@ function main() {
                         const avgVol = Math.floor((longC.vol + shortC.vol) / 2);
                         const avgOI = Math.floor((longC.oi + shortC.oi) / 2);
                         const s = score('Bull Call Spread', rr, gainPct, ivRank, avgVol, avgOI, dte);
+                        const netPrem = longC.callPrice - shortC.callPrice;
+                        const ts = tradeSetup(netPrem, 0.60);
                         results.push({
                             ticker, market, stockPrice:price, strategy:'Bull Call Spread',
                             strike:`${longC.K.toFixed(2)}/${shortC.K.toFixed(2)}`,
-                            expiry:expiryStr, dte, premium:(longC.callPrice-shortC.callPrice).toFixed(2),
+                            expiry:expiryStr, dte, premium:netPrem.toFixed(2),
                             maxGainPct:gainPct.toFixed(1), maxLoss:netDebit.toFixed(0),
                             breakeven:breakeven.toFixed(2), iv:(longC.iv*100).toFixed(1), ivRank,
-                            volume:avgVol, oi:avgOI, riskReward:rr.toFixed(2), score:s
+                            volume:avgVol, oi:avgOI, riskReward:rr.toFixed(2), score:s,
+                            entryDate:ts.entryDate, bid:ts.bid, ask:ts.ask, entryPrice:ts.entryPrice,
+                            targetStockPrice:shortC.K.toFixed(2), targetOptionPrice:'spread max',
+                            stopLoss:ts.stopLoss,
+                            action:`BUY ${longC.K.toFixed(0)} CALL @ $${longC.callPrice.toFixed(2)} + SELL ${shortC.K.toFixed(0)} CALL @ $${shortC.callPrice.toFixed(2)}, net debit $${netPrem.toFixed(2)}`
                         });
                     }
                 }
             }
-            
+
             // ===== Bear Put Spread (ATM long, 5% OTM short) =====
             const otmPutIdx = strikePcts.indexOf(0.95);
             if (otmPutIdx >= 0 && atmIdx >= 0) {
@@ -212,40 +246,52 @@ function main() {
                         const avgVol = Math.floor((longP.vol + shortP.vol) / 2);
                         const avgOI = Math.floor((longP.oi + shortP.oi) / 2);
                         const s = score('Bear Put Spread', rr, gainPct, ivRank, avgVol, avgOI, dte);
+                        const netPrem = longP.putPrice - shortP.putPrice;
+                        const ts = tradeSetup(netPrem, 0.60);
                         results.push({
                             ticker, market, stockPrice:price, strategy:'Bear Put Spread',
                             strike:`${longP.K.toFixed(2)}/${shortP.K.toFixed(2)}`,
-                            expiry:expiryStr, dte, premium:(longP.putPrice-shortP.putPrice).toFixed(2),
+                            expiry:expiryStr, dte, premium:netPrem.toFixed(2),
                             maxGainPct:gainPct.toFixed(1), maxLoss:netDebit.toFixed(0),
                             breakeven:breakeven.toFixed(2), iv:(longP.iv*100).toFixed(1), ivRank,
-                            volume:avgVol, oi:avgOI, riskReward:rr.toFixed(2), score:s
+                            volume:avgVol, oi:avgOI, riskReward:rr.toFixed(2), score:s,
+                            entryDate:ts.entryDate, bid:ts.bid, ask:ts.ask, entryPrice:ts.entryPrice,
+                            targetStockPrice:shortP.K.toFixed(2), targetOptionPrice:'spread max',
+                            stopLoss:ts.stopLoss,
+                            action:`BUY ${longP.K.toFixed(0)} PUT @ $${longP.putPrice.toFixed(2)} + SELL ${shortP.K.toFixed(0)} PUT @ $${shortP.putPrice.toFixed(2)}, net debit $${netPrem.toFixed(2)}`
                         });
                     }
                 }
             }
-            
+
             // ===== Long Straddle =====
             {
                 const c = atm;
                 const totalPrem = c.callPrice + c.putPrice;
                 const cost = totalPrem * 100;
-                const upsideGain = (1.5 * sigmaMove - totalPrem) * 100; // gain if stock moves 1.5 sigma
-                if (upsideGain <= 0) { /* skip */ } else {
-                const gainPct = (upsideGain / cost) * 100;
-                if (gainPct >= 20) {
-                    const rr = upsideGain / cost;
-                    const beUp = c.K + totalPrem, beDn = c.K - totalPrem;
-                    const s = score('Long Straddle', rr, gainPct, ivRank, c.vol, c.oi, dte);
-                    results.push({
-                        ticker, market, stockPrice:price, strategy:'Long Straddle', strike:c.K.toFixed(2),
-                        expiry:expiryStr, dte, premium:totalPrem.toFixed(2), maxGainPct:gainPct.toFixed(1),
-                        maxLoss:cost.toFixed(0), breakeven:`${beDn.toFixed(2)}/${beUp.toFixed(2)}`,
-                        iv:(c.iv*100).toFixed(1), ivRank, volume:c.vol, oi:c.oi, riskReward:rr.toFixed(2), score:s
-                    });
-                }
+                const upsideGain = (1.5 * sigmaMove - totalPrem) * 100;
+                if (upsideGain > 0) {
+                    const gainPct = (upsideGain / cost) * 100;
+                    if (gainPct >= 20) {
+                        const rr = upsideGain / cost;
+                        const beUp = c.K + totalPrem, beDn = c.K - totalPrem;
+                        const s = score('Long Straddle', rr, gainPct, ivRank, c.vol, c.oi, dte);
+                        const ts = tradeSetup(totalPrem, 0.40);
+                        results.push({
+                            ticker, market, stockPrice:price, strategy:'Long Straddle', strike:c.K.toFixed(2),
+                            expiry:expiryStr, dte, premium:totalPrem.toFixed(2), maxGainPct:gainPct.toFixed(1),
+                            maxLoss:cost.toFixed(0), breakeven:`${beDn.toFixed(2)}/${beUp.toFixed(2)}`,
+                            iv:(c.iv*100).toFixed(1), ivRank, volume:c.vol, oi:c.oi, riskReward:rr.toFixed(2), score:s,
+                            entryDate:ts.entryDate, bid:ts.bid, ask:ts.ask, entryPrice:ts.entryPrice,
+                            targetStockPrice:`>${beUp.toFixed(2)} or <${beDn.toFixed(2)}`,
+                            targetOptionPrice:+(totalPrem * (1 + gainPct/100 * 0.5)).toFixed(2),
+                            stopLoss:ts.stopLoss,
+                            action:`BUY ${c.K.toFixed(0)} CALL @ $${c.callPrice.toFixed(2)} + BUY ${c.K.toFixed(0)} PUT @ $${c.putPrice.toFixed(2)}, total $${totalPrem.toFixed(2)}`
+                        });
+                    }
                 }
             }
-            
+
             // ===== Covered Call (5% OTM) =====
             if (otmCallIdx >= 0) {
                 const c = chain[otmCallIdx];
@@ -258,11 +304,16 @@ function main() {
                     const rr = maxGain / maxLoss;
                     const breakeven = price - c.callPrice;
                     const s = score('Covered Call', rr, gainPct, ivRank, c.vol, c.oi, dte);
+                    const ts = tradeSetup(c.callPrice, 0.30);
                     results.push({
                         ticker, market, stockPrice:price, strategy:'Covered Call', strike:c.K.toFixed(2),
                         expiry:expiryStr, dte, premium:c.callPrice.toFixed(2), maxGainPct:gainPct.toFixed(1),
                         maxLoss:maxLoss.toFixed(0), breakeven:breakeven.toFixed(2), iv:(c.iv*100).toFixed(1),
-                        ivRank, volume:c.vol, oi:c.oi, riskReward:rr.toFixed(2), score:s
+                        ivRank, volume:c.vol, oi:c.oi, riskReward:rr.toFixed(2), score:s,
+                        entryDate:ts.entryDate, bid:ts.bid, ask:ts.ask, entryPrice:ts.entryPrice,
+                        targetStockPrice:c.K.toFixed(2), targetOptionPrice:'expire worthless',
+                        stopLoss: (price * 0.92).toFixed(2),
+                        action:`BUY 100 shares @ $${price.toFixed(2)} + SELL ${c.K.toFixed(0)} CALL @ $${c.callPrice.toFixed(2)} (bid $${ts.bid})`
                     });
                 }
             }
@@ -275,41 +326,51 @@ function main() {
         return parseFloat(b.maxGainPct) - parseFloat(a.maxGainPct);
     });
     
-    // CSV output
-    const headers = 'Rank,Ticker,Market,Stock Price,Strategy,Strike(s),Expiry,DTE,Premium,Max Gain %,Max Loss $,Breakeven,IV %,IV Rank,Volume,Open Interest,Risk/Reward,Score';
+    // CSV output with trade setup columns
+    const headers = 'Rank,Ticker,Market,Stock Price,Strategy,Strike(s),Expiry,DTE,Entry Date,Bid,Ask,Entry Price,Premium/Contract,Max Gain %,Max Loss $,Breakeven,Target Stock Price,Target Option Price,Stop Loss,IV %,IV Rank,Volume,Open Interest,Risk/Reward,Score,Trade Action';
     const csvLines = [headers];
     results.forEach((r, i) => {
-        csvLines.push([i+1,r.ticker,r.market,r.stockPrice,r.strategy,`"${r.strike}"`,r.expiry,r.dte,r.premium,r.maxGainPct,r.maxLoss,`"${r.breakeven}"`,r.iv,r.ivRank,r.volume,r.oi,r.riskReward,r.score].join(','));
+        csvLines.push([
+            i+1, r.ticker, r.market, r.stockPrice, r.strategy, `"${r.strike}"`,
+            r.expiry, r.dte, r.entryDate, r.bid, r.ask, r.entryPrice, r.premium,
+            r.maxGainPct, r.maxLoss, `"${r.breakeven}"`, `"${r.targetStockPrice}"`,
+            r.targetOptionPrice, r.stopLoss, r.iv, r.ivRank, r.volume, r.oi,
+            r.riskReward, r.score, `"${r.action}"`
+        ].join(','));
     });
     const csv = csvLines.join('\n');
     fs.writeFileSync('/home/user/kaomilim.github.io/scanner/scan_results.csv', csv);
     console.log(csv);
-    
+
     // Summary
-    console.error(`\n=== OptiMax Scanner Results ===`);
-    console.error(`Total: ${results.length} opportunities from ${US_STOCKS.length + SGX_STOCKS.length} tickers`);
-    console.error(`\n=== TOP 30 (Highest Score + Gain) ===`);
-    console.error('─'.repeat(140));
+    console.error(`\n=== OptiMax Scanner Results (SIMULATED DATA - ${SCAN_DATE}) ===`);
+    console.error(`*** DISCLAIMER: Prices are simulated via Black-Scholes. Verify with broker before trading. ***`);
+    console.error(`Total: ${results.length} opportunities from ${US_STOCKS.length + SGX_STOCKS.length} tickers\n`);
+    console.error('=== TOP 30 TRADE SETUPS (Highest Confidence + Gain) ===');
+    console.error('═'.repeat(160));
     console.error(
-        '#'.padEnd(4)+'Ticker'.padEnd(10)+'Mkt'.padEnd(5)+'Price'.padEnd(10)+
-        'Strategy'.padEnd(20)+'Strike'.padEnd(20)+'Expiry'.padEnd(12)+
-        'DTE'.padEnd(5)+'Gain%'.padEnd(10)+'MaxLoss$'.padEnd(10)+
-        'IV%'.padEnd(8)+'IVRk'.padEnd(6)+'Vol'.padEnd(8)+'R/R'.padEnd(7)+'Score'.padEnd(6)
+        '#'.padEnd(4)+'Ticker'.padEnd(9)+'Mkt'.padEnd(5)+'Price'.padEnd(9)+
+        'Strategy'.padEnd(19)+'Strike'.padEnd(14)+'Expiry'.padEnd(12)+'DTE'.padEnd(5)+
+        'Entry$'.padEnd(9)+'Bid'.padEnd(8)+'Ask'.padEnd(8)+
+        'Gain%'.padEnd(9)+'MaxLoss$'.padEnd(10)+'StopLoss'.padEnd(10)+
+        'Score'.padEnd(6)+'Trade Action'
     );
-    console.error('─'.repeat(140));
+    console.error('─'.repeat(160));
     results.slice(0, 30).forEach((r, i) => {
         console.error(
-            String(i+1).padEnd(4)+r.ticker.padEnd(10)+r.market.padEnd(5)+
-            String(r.stockPrice).padEnd(10)+r.strategy.padEnd(20)+
-            String(r.strike).substring(0,18).padEnd(20)+r.expiry.padEnd(12)+
-            String(r.dte).padEnd(5)+(r.maxGainPct+'%').padEnd(10)+
-            ('$'+r.maxLoss).padEnd(10)+(r.iv+'%').padEnd(8)+
-            String(r.ivRank).padEnd(6)+String(r.volume).padEnd(8)+
-            (r.riskReward+'x').padEnd(7)+String(r.score).padEnd(6)
+            String(i+1).padEnd(4)+r.ticker.padEnd(9)+r.market.padEnd(5)+
+            String(r.stockPrice).padEnd(9)+r.strategy.padEnd(19)+
+            String(r.strike).substring(0,12).padEnd(14)+r.expiry.padEnd(12)+
+            String(r.dte).padEnd(5)+
+            ('$'+r.entryPrice).padEnd(9)+('$'+r.bid).padEnd(8)+('$'+r.ask).padEnd(8)+
+            (r.maxGainPct+'%').padEnd(9)+
+            ('$'+r.maxLoss).padEnd(10)+('$'+r.stopLoss).padEnd(10)+
+            String(r.score).padEnd(6)+r.action.substring(0,60)
         );
     });
-    console.error('─'.repeat(140));
+    console.error('═'.repeat(160));
     console.error(`\nCSV saved to: scanner/scan_results.csv`);
+    console.error(`Entry Date for all trades: ${SCAN_DATE}`);
 }
 
 main();
