@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OptiMax Scanner - Stock Options Scanner</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-left">
+            <div class="logo">
+                <span class="logo-icon">&#9670;</span>
+                <span class="logo-text">OptiMax</span>
+                <span class="logo-tag">Scanner</span>
+            </div>
+        </div>
+        <div class="header-center">
+            <nav class="nav-tabs">
+                <button class="nav-tab active" data-tab="scanner">Scanner</button>
+                <button class="nav-tab" data-tab="watchlist">Watchlist</button>
+                <button class="nav-tab" data-tab="strategies">Strategies</button>
+                <button class="nav-tab" data-tab="settings">Settings</button>
+            </nav>
+        </div>
+        <div class="header-right">
+            <div class="market-status" id="marketStatus">
+                <span class="status-dot"></span>
+                <span class="status-text">Markets Closed</span>
+            </div>
+            <div class="api-key-btn" id="apiKeyBtn" title="Configure API Key">&#9881;</div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Scanner Tab -->
+        <section class="tab-content active" id="tab-scanner">
+            <!-- Market Selector & Filters -->
+            <div class="controls-bar">
+                <div class="control-group">
+                    <label>Market</label>
+                    <div class="market-toggle">
+                        <button class="market-btn active" data-market="US">US Market</button>
+                        <button class="market-btn" data-market="SGX">SGX (Singapore)</button>
+                        <button class="market-btn" data-market="ALL">Both</button>
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label>Strategy</label>
+                    <select id="strategyFilter">
+                        <option value="all">All Strategies</option>
+                        <option value="long_call">Long Call</option>
+                        <option value="long_put">Long Put</option>
+                        <option value="bull_call_spread">Bull Call Spread</option>
+                        <option value="bear_put_spread">Bear Put Spread</option>
+                        <option value="straddle">Long Straddle</option>
+                        <option value="strangle">Long Strangle</option>
+                        <option value="iron_condor">Iron Condor</option>
+                        <option value="covered_call">Covered Call</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label>Min Volume</label>
+                    <input type="number" id="minVolume" value="100" min="0" step="50">
+                </div>
+                <div class="control-group">
+                    <label>Max DTE</label>
+                    <input type="number" id="maxDTE" value="45" min="1" max="365">
+                </div>
+                <div class="control-group">
+                    <label>Min Gain %</label>
+                    <input type="number" id="minGain" value="50" min="0" step="10">
+                </div>
+                <div class="control-group">
+                    <label>Max Risk $</label>
+                    <input type="number" id="maxRisk" value="5000" min="100" step="100">
+                </div>
+                <div class="control-group scan-btn-group">
+                    <button class="scan-btn" id="scanBtn">
+                        <span class="scan-icon">&#9654;</span> Scan Market
+                    </button>
+                </div>
+            </div>
+
+            <!-- Quick Stats -->
+            <div class="stats-bar">
+                <div class="stat-card">
+                    <span class="stat-label">Tickers Scanned</span>
+                    <span class="stat-value" id="statScanned">0</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Opportunities Found</span>
+                    <span class="stat-value" id="statFound">0</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Best Gain %</span>
+                    <span class="stat-value highlight-green" id="statBestGain">--</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Avg IV Rank</span>
+                    <span class="stat-value" id="statAvgIV">--</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Scan Time</span>
+                    <span class="stat-value" id="statScanTime">--</span>
+                </div>
+            </div>
+
+            <!-- Progress Bar -->
+            <div class="progress-container" id="progressContainer" style="display:none;">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <div class="progress-text" id="progressText">Scanning...</div>
+            </div>
+
+            <!-- Results Table -->
+            <div class="results-section">
+                <div class="results-header">
+                    <h2>Scan Results</h2>
+                    <div class="results-actions">
+                        <button class="action-btn" id="exportBtn" title="Export CSV">&#128190; Export</button>
+                        <button class="action-btn" id="sortBtn" title="Sort by Gain">&#8645; Sort</button>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <table class="results-table" id="resultsTable">
+                        <thead>
+                            <tr>
+                                <th data-sort="rank">#</th>
+                                <th data-sort="ticker">Ticker</th>
+                                <th data-sort="market">Mkt</th>
+                                <th data-sort="price">Price</th>
+                                <th data-sort="strategy">Strategy</th>
+                                <th data-sort="strike">Strike(s)</th>
+                                <th data-sort="expiry">Expiry</th>
+                                <th data-sort="dte">DTE</th>
+                                <th data-sort="premium">Premium</th>
+                                <th data-sort="maxGain">Max Gain %</th>
+                                <th data-sort="maxLoss">Max Loss $</th>
+                                <th data-sort="breakeven">Breakeven</th>
+                                <th data-sort="iv">IV</th>
+                                <th data-sort="ivRank">IV Rank</th>
+                                <th data-sort="volume">Volume</th>
+                                <th data-sort="score">Score</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="resultsBody">
+                            <tr class="empty-row">
+                                <td colspan="17">
+                                    <div class="empty-state">
+                                        <div class="empty-icon">&#128269;</div>
+                                        <p>Click "Scan Market" to find option opportunities</p>
+                                        <p class="empty-hint">Configure your filters above, then run the scanner</p>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- Watchlist Tab -->
+        <section class="tab-content" id="tab-watchlist">
+            <div class="watchlist-header">
+                <h2>Watchlist</h2>
+                <div class="watchlist-actions">
+                    <input type="text" id="addTickerInput" placeholder="Add ticker (e.g., AAPL, D05.SI)">
+                    <button class="action-btn" id="addTickerBtn">+ Add</button>
+                </div>
+            </div>
+            <div class="watchlist-grid" id="watchlistGrid">
+                <div class="empty-state">
+                    <div class="empty-icon">&#11088;</div>
+                    <p>Your watchlist is empty</p>
+                    <p class="empty-hint">Add tickers above or click the star icon on scan results</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Strategies Tab -->
+        <section class="tab-content" id="tab-strategies">
+            <div class="strategies-section">
+                <h2>Options Strategy Calculator</h2>
+                <div class="strategy-builder">
+                    <div class="strategy-input-group">
+                        <div class="control-group">
+                            <label>Ticker</label>
+                            <input type="text" id="stratTicker" placeholder="AAPL">
+                        </div>
+                        <div class="control-group">
+                            <label>Strategy Type</label>
+                            <select id="stratType">
+                                <option value="long_call">Long Call</option>
+                                <option value="long_put">Long Put</option>
+                                <option value="bull_call_spread">Bull Call Spread</option>
+                                <option value="bear_put_spread">Bear Put Spread</option>
+                                <option value="straddle">Long Straddle</option>
+                                <option value="strangle">Long Strangle</option>
+                                <option value="iron_condor">Iron Condor</option>
+                                <option value="covered_call">Covered Call</option>
+                                <option value="protective_put">Protective Put</option>
+                                <option value="butterfly">Butterfly Spread</option>
+                            </select>
+                        </div>
+                        <div class="control-group">
+                            <label>Stock Price</label>
+                            <input type="number" id="stratStockPrice" placeholder="150.00" step="0.01">
+                        </div>
+                        <div class="control-group">
+                            <label>Strike 1</label>
+                            <input type="number" id="stratStrike1" placeholder="145" step="0.5">
+                        </div>
+                        <div class="control-group">
+                            <label>Strike 2</label>
+                            <input type="number" id="stratStrike2" placeholder="155" step="0.5">
+                        </div>
+                        <div class="control-group">
+                            <label>Premium 1</label>
+                            <input type="number" id="stratPremium1" placeholder="3.50" step="0.01">
+                        </div>
+                        <div class="control-group">
+                            <label>Premium 2</label>
+                            <input type="number" id="stratPremium2" placeholder="1.50" step="0.01">
+                        </div>
+                        <div class="control-group">
+                            <label>DTE</label>
+                            <input type="number" id="stratDTE" value="30" min="1">
+                        </div>
+                        <div class="control-group">
+                            <button class="scan-btn" id="calcStratBtn">Calculate</button>
+                        </div>
+                    </div>
+                    <div class="strategy-results" id="stratResults">
+                        <div class="empty-state">
+                            <div class="empty-icon">&#128200;</div>
+                            <p>Enter strategy parameters and click Calculate</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- Strategy Guide -->
+            <div class="strategy-guide">
+                <h3>Strategy Quick Reference</h3>
+                <div class="guide-grid">
+                    <div class="guide-card bullish">
+                        <h4>Bullish Strategies</h4>
+                        <ul>
+                            <li><strong>Long Call</strong> - Buy call, unlimited upside, limited risk</li>
+                            <li><strong>Bull Call Spread</strong> - Buy lower call, sell higher call. Capped gain, lower cost</li>
+                            <li><strong>Covered Call</strong> - Own stock + sell call. Income strategy</li>
+                        </ul>
+                    </div>
+                    <div class="guide-card bearish">
+                        <h4>Bearish Strategies</h4>
+                        <ul>
+                            <li><strong>Long Put</strong> - Buy put, profit from decline, limited risk</li>
+                            <li><strong>Bear Put Spread</strong> - Buy higher put, sell lower put. Capped gain, lower cost</li>
+                        </ul>
+                    </div>
+                    <div class="guide-card neutral">
+                        <h4>Neutral / Volatility</h4>
+                        <ul>
+                            <li><strong>Long Straddle</strong> - Buy call + put same strike. Profit from big moves</li>
+                            <li><strong>Long Strangle</strong> - Buy OTM call + put. Cheaper than straddle</li>
+                            <li><strong>Iron Condor</strong> - Sell strangle + buy wings. Profit from low vol</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Settings Tab -->
+        <section class="tab-content" id="tab-settings">
+            <div class="settings-section">
+                <h2>Scanner Settings</h2>
+                <div class="settings-grid">
+                    <div class="settings-card">
+                        <h3>API Configuration</h3>
+                        <div class="setting-item">
+                            <label>Data Provider</label>
+                            <select id="dataProvider">
+                                <option value="yahoo">Yahoo Finance (Free)</option>
+                                <option value="polygon">Polygon.io (API Key Required)</option>
+                                <option value="finnhub">Finnhub (API Key Required)</option>
+                            </select>
+                        </div>
+                        <div class="setting-item">
+                            <label>API Key</label>
+                            <input type="password" id="apiKeyInput" placeholder="Enter your API key">
+                            <button class="action-btn" id="saveApiKey">Save</button>
+                        </div>
+                        <div class="setting-item">
+                            <label>CORS Proxy</label>
+                            <select id="corsProxy">
+                                <option value="corsproxy">corsproxy.io</option>
+                                <option value="allorigins">allorigins.win</option>
+                                <option value="none">None (Direct)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="settings-card">
+                        <h3>Scanner Defaults</h3>
+                        <div class="setting-item">
+                            <label>Scan Batch Size</label>
+                            <input type="number" id="batchSize" value="10" min="1" max="50">
+                            <span class="setting-hint">Tickers per API batch (lower = slower but more reliable)</span>
+                        </div>
+                        <div class="setting-item">
+                            <label>Request Delay (ms)</label>
+                            <input type="number" id="requestDelay" value="500" min="100" max="5000" step="100">
+                            <span class="setting-hint">Delay between API requests to avoid rate limits</span>
+                        </div>
+                        <div class="setting-item">
+                            <label>US Stock Universe</label>
+                            <select id="usUniverse">
+                                <option value="sp500">S&P 500</option>
+                                <option value="nasdaq100">NASDAQ 100</option>
+                                <option value="popular">Popular (Top 100 by Volume)</option>
+                                <option value="all">All Major US Stocks</option>
+                            </select>
+                        </div>
+                        <div class="setting-item">
+                            <label>SGX Stock Universe</label>
+                            <select id="sgxUniverse">
+                                <option value="sti">Straits Times Index</option>
+                                <option value="popular_sgx">Popular SGX Stocks</option>
+                                <option value="all_sgx">All SGX Options-Eligible</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="settings-card">
+                        <h3>Display</h3>
+                        <div class="setting-item">
+                            <label>Currency Display</label>
+                            <select id="currencyDisplay">
+                                <option value="local">Local Currency (USD/SGD)</option>
+                                <option value="usd">Convert All to USD</option>
+                            </select>
+                        </div>
+                        <div class="setting-item">
+                            <label>Results Per Page</label>
+                            <input type="number" id="resultsPerPage" value="50" min="10" max="200" step="10">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Option Detail Modal -->
+    <div class="modal-overlay" id="detailModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">Option Details</h2>
+                <button class="modal-close" id="modalClose">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+            </div>
+        </div>
+    </div>
+
+    <!-- API Key Modal -->
+    <div class="modal-overlay" id="apiKeyModal">
+        <div class="modal-content modal-small">
+            <div class="modal-header">
+                <h2>API Key Setup</h2>
+                <button class="modal-close" id="apiKeyModalClose">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>To fetch live market data, you can use a free API key from one of these providers:</p>
+                <div class="api-providers">
+                    <div class="api-provider">
+                        <h4>Yahoo Finance (Default)</h4>
+                        <p>No API key required. Uses public endpoints with CORS proxy.</p>
+                    </div>
+                    <div class="api-provider">
+                        <h4>Polygon.io</h4>
+                        <p>Free tier: 5 API calls/minute. Sign up at polygon.io</p>
+                    </div>
+                    <div class="api-provider">
+                        <h4>Finnhub</h4>
+                        <p>Free tier: 60 API calls/minute. Sign up at finnhub.io</p>
+                    </div>
+                </div>
+                <div class="setting-item" style="margin-top:1rem">
+                    <label>Provider</label>
+                    <select id="modalProvider">
+                        <option value="yahoo">Yahoo Finance</option>
+                        <option value="polygon">Polygon.io</option>
+                        <option value="finnhub">Finnhub</option>
+                    </select>
+                </div>
+                <div class="setting-item">
+                    <label>API Key</label>
+                    <input type="password" id="modalApiKey" placeholder="Paste API key here">
+                </div>
+                <button class="scan-btn" id="saveModalApiKey" style="margin-top:1rem">Save & Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="js/data.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/options.js"></script>
+    <script src="js/scanner.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
