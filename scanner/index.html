@@ -40,6 +40,7 @@
         <!-- Scanner Tab -->
         <section class="tab-content active" id="tab-scanner">
             <!-- Market Selector & Filters -->
+            <!-- Step 1: Market & Volume Filter (screen entire market) -->
             <div class="controls-bar">
                 <div class="control-group">
                     <label>Market</label>
@@ -49,6 +50,36 @@
                         <button class="market-btn" data-market="ALL">Both</button>
                     </div>
                 </div>
+                <div class="control-group">
+                    <label>Stock Source</label>
+                    <select id="stockSource">
+                        <option value="screener">Full Market Screener (Live)</option>
+                        <option value="hardcoded">Preset Lists (S&P 500 / STI)</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label>US Min Daily $ Volume</label>
+                    <select id="usMinDollarVolume">
+                        <option value="10000000">$10M+</option>
+                        <option value="25000000">$25M+</option>
+                        <option value="50000000" selected>$50M+ (Recommended)</option>
+                        <option value="100000000">$100M+</option>
+                        <option value="250000000">$250M+</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label>SGX Min Daily Volume</label>
+                    <select id="sgxMinShareVolume">
+                        <option value="100000">100K+ shares</option>
+                        <option value="500000">500K+ shares</option>
+                        <option value="1000000" selected>1M+ shares (Recommended)</option>
+                        <option value="5000000">5M+ shares</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Step 2: Options Filter -->
+            <div class="controls-bar">
                 <div class="control-group">
                     <label>Strategy</label>
                     <select id="strategyFilter">
@@ -64,7 +95,7 @@
                     </select>
                 </div>
                 <div class="control-group">
-                    <label>Min Volume</label>
+                    <label>Min Opt Volume</label>
                     <input type="number" id="minVolume" value="100" min="0" step="50">
                 </div>
                 <div class="control-group">
@@ -81,7 +112,7 @@
                 </div>
                 <div class="control-group scan-btn-group">
                     <button class="scan-btn" id="scanBtn">
-                        <span class="scan-icon">&#9654;</span> Scan Market
+                        <span class="scan-icon">&#9654;</span> Scan Entire Market
                     </button>
                 </div>
             </div>
@@ -89,7 +120,11 @@
             <!-- Quick Stats -->
             <div class="stats-bar">
                 <div class="stat-card">
-                    <span class="stat-label">Tickers Scanned</span>
+                    <span class="stat-label">Passed Volume Filter</span>
+                    <span class="stat-value" id="statFiltered">--</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Options Scanned</span>
                     <span class="stat-value" id="statScanned">0</span>
                 </div>
                 <div class="stat-card">

@@ -125,14 +125,15 @@ const App = (() => {
 
         if (state.isScanning) {
             Scanner.stop();
-            scanBtn.innerHTML = '<span class="scan-icon">&#9654;</span> Scan Market';
+            scanBtn.innerHTML = '<span class="scan-icon">&#9654;</span> Scan Entire Market';
             scanBtn.classList.remove('scanning');
             hideProgress();
             showToast('Scan stopped', 'warning');
             return;
         }
 
-        // Get filters
+        // Get filters - including volume-based market screening
+        const stockSource = document.getElementById('stockSource')?.value || 'screener';
         const filters = {
             market: currentMarket,
             strategy: document.getElementById('strategyFilter').value,
@@ -142,6 +143,9 @@ const App = (() => {
             maxRisk: parseInt(document.getElementById('maxRisk').value) || 10000,
             usUniverse: document.getElementById('usUniverse')?.value || 'sp500',
             sgxUniverse: document.getElementById('sgxUniverse')?.value || 'sti',
+            useScreener: stockSource === 'screener',
+            usMinDollarVolume: parseInt(document.getElementById('usMinDollarVolume')?.value) || 50000000,
+            sgxMinShareVolume: parseInt(document.getElementById('sgxMinShareVolume')?.value) || 1000000,
         };
 
         // UI updates
@@ -151,25 +155,35 @@ const App = (() => {
         clearResults();
         scanStartTime = Date.now();
 
+        updateStat('statFiltered', 'Screening...');
         updateStat('statScanned', '0');
         updateStat('statFound', '0');
         updateStat('statBestGain', '--');
         updateStat('statAvgIV', '--');
         updateStat('statScanTime', '--');
 
-        showToast(`Scanning ${currentMarket} market...`, 'info');
+        const srcLabel = filters.useScreener ? 'full market screener' : 'preset list';
+        const volLabel = currentMarket === 'SGX'
+            ? `${(filters.sgxMinShareVolume / 1e6).toFixed(1)}M shares`
+            : `$${(filters.usMinDollarVolume / 1e6).toFixed(0)}M`;
+        showToast(`Screening ${currentMarket} market (${srcLabel}, min vol ${volLabel})...`, 'info');
 
         let bestGain = 0;
         let totalIV = 0;
         let ivCount = 0;
+        let filteredCount = 0;
 
         try {
             const results = await Scanner.scan(
                 filters,
                 // Progress callback
                 (scanned, total, ticker) => {
-                    const pct = Math.round((scanned / total) * 100);
-                    updateProgress(pct, `Scanning ${ticker} (${scanned}/${total})`);
+                    if (total > 0 && filteredCount === 0) {
+                        filteredCount = total;
+                        updateStat('statFiltered', total.toString());
+                    }
+                    const pct = total > 0 ? Math.round((scanned / total) * 100) : 0;
+                    updateProgress(pct, `Scanning options: ${ticker} (${scanned}/${total})`);
                     updateStat('statScanned', scanned.toString());
                 },
                 // Result callback
@@ -201,7 +215,7 @@ const App = (() => {
         }
 
         // Reset button
-        scanBtn.innerHTML = '<span class="scan-icon">&#9654;</span> Scan Market';
+        scanBtn.innerHTML = '<span class="scan-icon">&#9654;</span> Scan Entire Market';
         scanBtn.classList.remove('scanning');
         hideProgress();
     }

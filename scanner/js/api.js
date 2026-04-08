@@ -306,6 +306,177 @@ const API = (() => {
         return await Yahoo.getHistoricalData(ticker, range);
     }
 
+    // ===== Stock Screener - Fetch full market filtered by volume =====
+
+    /**
+     * Screen entire US market for stocks with average volume >= minVolume
+     * Uses Yahoo Finance screener POST endpoint
+     * @param {number} minVolume - Minimum average daily dollar volume (e.g., 50000000 for 50M)
+     * @param {number} maxResults - Max tickers to return (default 250)
+     * @returns {Array} Array of {ticker, price, volume, marketCap, name}
+     */
+    async function screenUSByVolume(minVolume = 50000000, maxResults = 250) {
+        // Yahoo Finance screener query
+        const body = JSON.stringify({
+            size: maxResults,
+            offset: 0,
+            sortField: 'avgdailyvol3m',
+            sortType: 'DESC',
+            quoteType: 'EQUITY',
+            query: {
+                operator: 'AND',
+                operands: [
+                    { operator: 'or', operands: [
+                        { operator: 'EQ', operands: ['region', 'us'] }
+                    ]},
+                    { operator: 'GT', operands: ['avgdailyvol3m', minVolume / 100] }, // volume in shares
+                    { operator: 'GT', operands: ['intradaymarketcap', 1000000000] }, // min 1B market cap
+                ]
+            }
+        });
+
+        const url = proxyUrl('https://query2.finance.yahoo.com/v1/finance/screener?formatted=false&lang=en-US&region=US');
+        const resp = await rateLimitedFetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: body
+        });
+        const data = await resp.json();
+
+        if (!data.finance || !data.finance.result || data.finance.result.length === 0) {
+            throw new Error('Screener returned no results');
+        }
+
+        const quotes = data.finance.result[0].quotes || [];
+        return quotes.map(q => ({
+            ticker: q.symbol,
+            name: q.shortName || q.longName || q.symbol,
+            price: q.regularMarketPrice || 0,
+            volume: q.regularMarketVolume || 0,
+            avgVolume: q.averageDailyVolume3Month || 0,
+            marketCap: q.marketCap || 0,
+            exchange: q.exchange || '',
+        }));
+    }
+
+    /**
+     * Screen SGX market for stocks with volume >= minVolume
+     * Uses Yahoo Finance screener for Singapore exchange
+     * @param {number} minVolume - Minimum daily volume in shares (e.g., 1000000 for 1M)
+     * @param {number} maxResults - Max tickers to return
+     */
+    async function screenSGXByVolume(minVolume = 1000000, maxResults = 100) {
+        const body = JSON.stringify({
+            size: maxResults,
+            offset: 0,
+            sortField: 'avgdailyvol3m',
+            sortType: 'DESC',
+            quoteType: 'EQUITY',
+            query: {
+                operator: 'AND',
+                operands: [
+                    { operator: 'or', operands: [
+                        { operator: 'EQ', operands: ['exchange', 'SES'] }
+                    ]},
+                    { operator: 'GT', operands: ['avgdailyvol3m', minVolume] },
+                ]
+            }
+        });
+
+        const url = proxyUrl('https://query2.finance.yahoo.com/v1/finance/screener?formatted=false&lang=en-US&region=SG');
+        const resp = await rateLimitedFetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: body
+        });
+        const data = await resp.json();
+
+        if (!data.finance || !data.finance.result || data.finance.result.length === 0) {
+            throw new Error('SGX screener returned no results');
+        }
+
+        const quotes = data.finance.result[0].quotes || [];
+        return quotes.map(q => ({
+            ticker: q.symbol,
+            name: q.shortName || q.longName || q.symbol,
+            price: q.regularMarketPrice || 0,
+            volume: q.regularMarketVolume || 0,
+            avgVolume: q.averageDailyVolume3Month || 0,
+            marketCap: q.marketCap || 0,
+            exchange: q.exchange || 'SES',
+        }));
+    }
+
+    /**
+     * Alternative: Use Yahoo Finance's most-active endpoint
+     * Falls back to this if screener POST is blocked
+     */
+    async function getMostActive(market = 'US', count = 100) {
+        let listName;
+        if (market === 'SGX' || market === 'SG') {
+            listName = 'day_gainers'; // Fallback - SGX specific lists limited
+        } else {
+            listName = 'most_actives';
+        }
+
+        const url = proxyUrl(
+            `https://query1.finance.yahoo.com/v1/finance/trending/${market === 'SGX' ? 'SG' : 'US'}?count=${count}`
+        );
+
+        try {
+            const resp = await rateLimitedFetch(url);
+            const data = await resp.json();
+            if (data.finance && data.finance.result) {
+                const quotes = data.finance.result[0]?.quotes || [];
+                return quotes.map(q => ({
+                    ticker: q.symbol,
+                    name: q.symbol,
+                    price: 0,
+                    volume: 0,
+                    avgVolume: 0,
+                }));
+            }
+        } catch (e) {
+            console.warn('Trending endpoint failed:', e.message);
+        }
+        return [];
+    }
+
+    /**
+     * Full market scan: Screen → Filter → Return ticker list
+     * This is the main entry point for dynamic stock discovery
+     */
+    async function discoverStocks(market, usMinVolume = 50000000, sgxMinVolume = 1000000, maxResults = 250) {
+        const results = [];
+
+        if (market === 'US' || market === 'ALL') {
+            try {
+                const usStocks = await screenUSByVolume(usMinVolume, maxResults);
+                results.push(...usStocks);
+                console.log(`Screener found ${usStocks.length} US stocks with volume > ${(usMinVolume/1e6).toFixed(0)}M`);
+            } catch (e) {
+                console.warn('US screener failed, falling back to hardcoded list:', e.message);
+                // Fallback to hardcoded list
+                const fallbackTickers = MarketData.getTickers('US', 'sp500');
+                results.push(...fallbackTickers.map(t => ({ ticker: t, name: t, price: 0, volume: 0, avgVolume: 0 })));
+            }
+        }
+
+        if (market === 'SGX' || market === 'ALL') {
+            try {
+                const sgxStocks = await screenSGXByVolume(sgxMinVolume, maxResults);
+                results.push(...sgxStocks);
+                console.log(`Screener found ${sgxStocks.length} SGX stocks with volume > ${(sgxMinVolume/1e6).toFixed(1)}M`);
+            } catch (e) {
+                console.warn('SGX screener failed, falling back to hardcoded list:', e.message);
+                const fallbackTickers = MarketData.getTickers('SGX', 'sti');
+                results.push(...fallbackTickers.map(t => ({ ticker: t, name: t, price: 0, volume: 0, avgVolume: 0 })));
+            }
+        }
+
+        return results;
+    }
+
     // ===== Batch Operations =====
     async function batchGetQuotes(tickers, onProgress) {
         const results = [];
@@ -386,6 +557,10 @@ const API = (() => {
         batchGetQuotes,
         batchGetOptions,
         calcHistoricalVolatility,
+        screenUSByVolume,
+        screenSGXByVolume,
+        getMostActive,
+        discoverStocks,
         setConfig,
         getConfig,
         loadConfig,
