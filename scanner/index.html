@@ -317,27 +317,26 @@
                 <h2>Scanner Settings</h2>
                 <div class="settings-grid">
                     <div class="settings-card">
-                        <h3>API Configuration</h3>
-                        <div class="setting-item">
-                            <label>Data Provider</label>
-                            <select id="dataProvider">
-                                <option value="yahoo">Yahoo Finance (Free)</option>
-                                <option value="polygon">Polygon.io (API Key Required)</option>
-                                <option value="finnhub">Finnhub (API Key Required)</option>
-                            </select>
-                        </div>
-                        <div class="setting-item">
-                            <label>API Key</label>
-                            <input type="password" id="apiKeyInput" placeholder="Enter your API key">
-                            <button class="action-btn" id="saveApiKey">Save</button>
-                        </div>
+                        <h3>Data Source (Yahoo Finance - Free, No Key Needed)</h3>
                         <div class="setting-item">
                             <label>CORS Proxy</label>
                             <select id="corsProxy">
+                                <option value="auto" selected>Auto (tries all, picks fastest)</option>
                                 <option value="corsproxy">corsproxy.io</option>
                                 <option value="allorigins">allorigins.win</option>
-                                <option value="none">None (Direct)</option>
+                                <option value="corsanywhere">cors-anywhere</option>
+                                <option value="thingproxy">thingproxy</option>
+                                <option value="none">None (Direct - only works on same server)</option>
                             </select>
+                            <span class="setting-hint">Auto mode tests all proxies and picks the working one</span>
+                        </div>
+                        <div class="setting-item">
+                            <button class="scan-btn" id="testConnectionBtn" style="width:100%">Test Connection (Fetch AAPL price)</button>
+                            <div id="connectionTestResult" style="margin-top:0.5rem;font-size:0.82rem;font-family:var(--font-mono);color:var(--text-secondary);"></div>
+                        </div>
+                            <label>API Key</label>
+                            <input type="password" id="apiKeyInput" placeholder="Optional - not needed for Yahoo Finance">
+                            <button class="action-btn" id="saveApiKey">Save</button>
                         </div>
                     </div>
                     <div class="settings-card">
