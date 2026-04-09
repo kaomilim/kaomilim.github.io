@@ -65,64 +65,32 @@ const Scanner = (() => {
         const total = tickers.length;
         let scanned = 0;
 
-        for (const ticker of tickers) {
+        // ===== PARALLEL SCANNING: process 3 tickers at once =====
+        const PARALLEL = 3;
+
+        for (let i = 0; i < tickers.length; i += PARALLEL) {
             if (shouldStop) break;
 
-            try {
-                if (onProgress) {
-                    onProgress(scanned, total, ticker);
-                }
+            const batch = tickers.slice(i, i + PARALLEL);
 
-                // Fetch options chain
-                const chain = await API.getOptionsChain(ticker);
-
-                if (!chain || !chain.price || chain.price <= 0) {
-                    scanned++;
-                    continue;
-                }
-
-                // Get historical data for IV calculation
-                let historicalVol = 0.3; // Default 30%
-                try {
-                    const hist = await API.getHistoricalData(ticker, '3mo');
-                    historicalVol = API.calcHistoricalVolatility(hist.closes);
-                    if (historicalVol <= 0) historicalVol = 0.3;
-                } catch (e) {
-                    // Use default
-                }
-
-                const stockPrice = chain.price;
-                const mkt = MarketData.getMarket(ticker);
-
-                // Process each expiration's options
-                const calls = chain.calls || [];
-                const puts = chain.puts || [];
-
-                if (calls.length === 0 && puts.length === 0) {
-                    scanned++;
-                    continue;
-                }
-
-                // Group options by approximate expiry
-                const allOptions = { calls, puts };
-
-                // Evaluate strategies
-                const opportunities = evaluateStrategies(
-                    ticker, stockPrice, allOptions, historicalVol,
-                    strategy, minVolume, maxDTE, minGain, maxRisk, mkt
-                );
-
-                for (const opp of opportunities) {
-                    scanResults.push(opp);
-                    if (onResult) onResult(opp);
-                }
-
-            } catch (err) {
-                // Skip tickers that fail
-                console.warn(`Scan failed for ${ticker}:`, err.message);
+            if (onProgress) {
+                onProgress(scanned, total, batch.join(', '));
             }
 
-            scanned++;
+            // Fetch all tickers in this batch in parallel
+            const batchResults = await Promise.allSettled(
+                batch.map(ticker => scanSingleTicker(ticker, filters))
+            );
+
+            for (const result of batchResults) {
+                scanned++;
+                if (result.status === 'fulfilled' && result.value) {
+                    for (const opp of result.value) {
+                        scanResults.push(opp);
+                        if (onResult) onResult(opp);
+                    }
+                }
+            }
         }
 
         // Sort by score (descending)
@@ -130,6 +98,48 @@ const Scanner = (() => {
 
         isScanning = false;
         return scanResults;
+    }
+
+    /**
+     * Scan a single ticker - fetches options chain and evaluates strategies
+     * Skips the slow historical volatility call - uses IV from options chain instead
+     */
+    async function scanSingleTicker(ticker, filters) {
+        const {
+            strategy = 'all',
+            minVolume = 100,
+            maxDTE = 45,
+            minGain = 50,
+            maxRisk = 5000,
+        } = filters;
+
+        // Fetch options chain (single API call per ticker)
+        const chain = await API.getOptionsChain(ticker);
+
+        if (!chain || !chain.price || chain.price <= 0) return [];
+
+        const stockPrice = chain.price;
+        const mkt = MarketData.getMarket(ticker);
+        const calls = chain.calls || [];
+        const puts = chain.puts || [];
+
+        if (calls.length === 0 && puts.length === 0) return [];
+
+        // Use average IV from the options chain instead of slow historical API call
+        let historicalVol = 0.3;
+        const allIVs = [...calls, ...puts]
+            .map(o => o.impliedVolatility)
+            .filter(iv => iv && iv > 0);
+        if (allIVs.length > 0) {
+            historicalVol = allIVs.reduce((a, b) => a + b, 0) / allIVs.length;
+        }
+
+        const allOptions = { calls, puts };
+
+        return evaluateStrategies(
+            ticker, stockPrice, allOptions, historicalVol,
+            strategy, minVolume, maxDTE, minGain, maxRisk, mkt
+        );
     }
 
     /**

@@ -10,8 +10,8 @@ const API = (() => {
         provider: 'yahoo',
         apiKey: '',
         corsProxy: 'auto',  // 'auto' tries all proxies in order
-        requestDelay: 600,
-        batchSize: 5,
+        requestDelay: 300,  // Lower delay since we batch 3 at a time
+        batchSize: 3,
     };
 
     // ===== CORS Proxy Chain (tried in order until one works) =====
@@ -251,123 +251,106 @@ const API = (() => {
         return await Yahoo.getHistoricalData(ticker, range);
     }
 
-    // ===== Stock Screener - Full market filtered by volume =====
+    // ===== Stock Discovery - Multiple strategies to find high-volume stocks =====
 
     /**
-     * Screen entire US market by volume using Yahoo screener
+     * Strategy 1: Yahoo predefined screeners (GET, more reliable than POST)
+     * Fetches most active stocks - these are the highest volume by definition
      */
-    async function screenUSByVolume(minVolume = 50000000, maxResults = 250) {
-        const body = JSON.stringify({
-            size: maxResults,
-            offset: 0,
-            sortField: 'avgdailyvol3m',
-            sortType: 'DESC',
-            quoteType: 'EQUITY',
-            query: {
-                operator: 'AND',
-                operands: [
-                    { operator: 'or', operands: [{ operator: 'EQ', operands: ['region', 'us'] }]},
-                    { operator: 'GT', operands: ['avgdailyvol3m', minVolume / 100] },
-                    { operator: 'GT', operands: ['intradaymarketcap', 1000000000] },
-                ]
-            }
-        });
-
-        const url = 'https://query2.finance.yahoo.com/v1/finance/screener?formatted=false&lang=en-US&region=US';
-        const resp = await resilientFetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body
-        });
+    async function fetchYahooList(listId, count = 250) {
+        const url = `${Yahoo.getBase()}/v1/finance/screener/predefined/saved?scrIds=${listId}&count=${count}`;
+        const resp = await resilientFetch(url);
         const data = await resp.json();
 
-        if (!data.finance || !data.finance.result || data.finance.result.length === 0) {
-            throw new Error('Screener returned no results');
+        if (data.finance && data.finance.result && data.finance.result.length > 0) {
+            return (data.finance.result[0].quotes || []).map(q => ({
+                ticker: q.symbol,
+                name: q.shortName || q.longName || q.symbol,
+                price: q.regularMarketPrice || 0,
+                volume: q.regularMarketVolume || 0,
+                avgVolume: q.averageDailyVolume3Month || 0,
+                marketCap: q.marketCap || 0,
+            }));
         }
-
-        return (data.finance.result[0].quotes || []).map(q => ({
-            ticker: q.symbol,
-            name: q.shortName || q.longName || q.symbol,
-            price: q.regularMarketPrice || 0,
-            volume: q.regularMarketVolume || 0,
-            avgVolume: q.averageDailyVolume3Month || 0,
-            marketCap: q.marketCap || 0,
-        }));
+        throw new Error(`Yahoo list ${listId} returned no data`);
     }
 
     /**
-     * Screen SGX market by volume
+     * Strategy 2: Yahoo trending tickers
      */
-    async function screenSGXByVolume(minVolume = 1000000, maxResults = 100) {
-        const body = JSON.stringify({
-            size: maxResults,
-            offset: 0,
-            sortField: 'avgdailyvol3m',
-            sortType: 'DESC',
-            quoteType: 'EQUITY',
-            query: {
-                operator: 'AND',
-                operands: [
-                    { operator: 'or', operands: [{ operator: 'EQ', operands: ['exchange', 'SES'] }]},
-                    { operator: 'GT', operands: ['avgdailyvol3m', minVolume] },
-                ]
-            }
-        });
-
-        const url = 'https://query2.finance.yahoo.com/v1/finance/screener?formatted=false&lang=en-US&region=SG';
-        const resp = await resilientFetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body
-        });
+    async function fetchTrending(region = 'US', count = 50) {
+        const url = `${Yahoo.getBase()}/v1/finance/trending/${region}?count=${count}`;
+        const resp = await resilientFetch(url);
         const data = await resp.json();
-
-        if (!data.finance || !data.finance.result || data.finance.result.length === 0) {
-            throw new Error('SGX screener returned no results');
+        if (data.finance && data.finance.result && data.finance.result.length > 0) {
+            return (data.finance.result[0].quotes || []).map(q => ({
+                ticker: q.symbol,
+                name: q.symbol,
+                price: 0,
+                volume: 0,
+                avgVolume: 0,
+            }));
         }
-
-        return (data.finance.result[0].quotes || []).map(q => ({
-            ticker: q.symbol,
-            name: q.shortName || q.longName || q.symbol,
-            price: q.regularMarketPrice || 0,
-            volume: q.regularMarketVolume || 0,
-            avgVolume: q.averageDailyVolume3Month || 0,
-            marketCap: q.marketCap || 0,
-        }));
+        return [];
     }
 
     /**
-     * Full market discovery: screen by volume, return filtered tickers
-     * Falls back to hardcoded lists if screener fails
+     * Full market discovery: tries multiple Yahoo endpoints to build the biggest stock list
+     * Then filters by volume threshold
      */
     async function discoverStocks(market, usMinVolume = 50000000, sgxMinVolume = 1000000, maxResults = 250) {
-        const results = [];
+        const allStocks = [];
+        const seen = new Set();
+
+        function addStocks(stocks) {
+            for (const s of stocks) {
+                if (!seen.has(s.ticker)) {
+                    seen.add(s.ticker);
+                    allStocks.push(s);
+                }
+            }
+        }
 
         if (market === 'US' || market === 'ALL') {
+            // Try multiple Yahoo screener lists to build comprehensive US universe
+            const lists = ['most_actives', 'day_gainers', 'day_losers', 'undervalued_large_caps', 'growth_technology_stocks'];
+            for (const listId of lists) {
+                try {
+                    const stocks = await fetchYahooList(listId, maxResults);
+                    addStocks(stocks);
+                    console.log(`${listId}: +${stocks.length} stocks (total: ${allStocks.length})`);
+                } catch (e) {
+                    console.warn(`List ${listId} failed:`, e.message);
+                }
+            }
+
+            // Also try trending
             try {
-                const usStocks = await screenUSByVolume(usMinVolume, maxResults);
-                results.push(...usStocks);
-                console.log(`Screener: ${usStocks.length} US stocks above $${(usMinVolume/1e6).toFixed(0)}M vol`);
-            } catch (e) {
-                console.warn('US screener failed, using preset list:', e.message);
+                addStocks(await fetchTrending('US', 50));
+            } catch (e) {}
+
+            // If all live endpoints failed, fall back to hardcoded
+            const usCount = [...seen].filter(t => !t.endsWith('.SI')).length;
+            if (usCount < 50) {
+                console.warn(`Only ${usCount} US stocks from live data, adding preset list`);
                 const fallback = MarketData.getTickers('US', 'sp500');
-                results.push(...fallback.map(t => ({ ticker: t, name: t, price: 0, volume: 0, avgVolume: 0 })));
+                addStocks(fallback.map(t => ({ ticker: t, name: t, price: 0, volume: 0, avgVolume: 0 })));
             }
         }
 
         if (market === 'SGX' || market === 'ALL') {
+            // Try trending for SGX
             try {
-                const sgxStocks = await screenSGXByVolume(sgxMinVolume, maxResults);
-                results.push(...sgxStocks);
-                console.log(`Screener: ${sgxStocks.length} SGX stocks above ${(sgxMinVolume/1e6).toFixed(1)}M vol`);
-            } catch (e) {
-                console.warn('SGX screener failed, using preset list:', e.message);
-                const fallback = MarketData.getTickers('SGX', 'sti');
-                results.push(...fallback.map(t => ({ ticker: t, name: t, price: 0, volume: 0, avgVolume: 0 })));
-            }
+                addStocks(await fetchTrending('SG', 50));
+            } catch (e) {}
+
+            // SGX always include hardcoded STI stocks (small list, options limited anyway)
+            const fallback = MarketData.getTickers('SGX', 'all_sgx');
+            addStocks(fallback.map(t => ({ ticker: t, name: t, price: 0, volume: 0, avgVolume: 0 })));
         }
 
-        return results;
+        console.log(`Discovery complete: ${allStocks.length} total stocks`);
+        return allStocks;
     }
 
     // ===== Batch Operations =====
@@ -450,9 +433,8 @@ const API = (() => {
         batchGetQuotes,
         batchGetOptions,
         calcHistoricalVolatility,
-        screenUSByVolume,
-        screenSGXByVolume,
         discoverStocks,
+        fetchYahooList,
         testConnection,
         setConfig,
         getConfig,
