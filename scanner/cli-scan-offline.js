@@ -34,25 +34,62 @@ function randRange(lo, hi) { return lo + rand() * (hi - lo); }
 function randInt(lo, hi) { return Math.floor(randRange(lo, hi + 1)); }
 
 // ===== Stock Data =====
-const US_STOCKS = [
-    ['AAPL',220],['MSFT',440],['AMZN',210],['NVDA',125],['GOOGL',175],['META',570],['TSLA',250],['AMD',115],['NFLX',960],['JPM',245],
-    ['V',330],['MA',540],['HD',385],['COST',960],['AVGO',190],['CRM',310],['ADBE',460],['INTC',22],['QCOM',175],['PYPL',72],
-    ['BA',185],['DIS',105],['UBER',78],['ABNB',155],['SQ',80],['COIN',235],['PLTR',95],['SOFI',14],['DKNG',42],['SNAP',12],
-    ['ROKU',82],['RIVN',14],['NIO',4.5],['BABA',120],['PFE',24],['MRNA',35],['XOM',108],['CVX',155],['GS',560],['BAC',42],
-    ['WMT',92],['TGT',125],['NKE',70],['SBUX',95],['MCD',300],['KO',65],['PEP',155],['JNJ',160],['UNH',530],['LLY',850],
-    ['ABBV',185],['MRK',85],['BMY',50],['GILD',115],['AMGN',310],['REGN',780],['ISRG',530],['DXCM',78],['CRWD',370],['PANW',195],
-    ['ZS',235],['NET',115],['SNOW',175],['DDOG',130],['MDB',235],['SHOP',110],['SE',115],['MELI',1850],['TTD',85],['ENPH',68],
-    ['FSLR',185],['F',10],['GM',48],['DAL',52],['AAL',14],['CCL',22],['T',28],['VZ',42],['C',70],['WFC',72],
-    ['SPY',570],['QQQ',510],['IWM',210],['XLF',46],['XLE',85],['XLK',230],['GLD',300],['SLV',33],['TLT',88],['EEM',42],
-    ['SMCI',38],['ARM',160],['MRVL',85],['MU',98],['ANET',95],['ON',42],['LRCX',85],['KLAC',710],['AMAT',165],['TXN',180],
+// Format: [ticker, price, avgDailyDollarVolume (USD millions), avgDailyShareVolume]
+// Simulated full US market universe (200 stocks) - includes stocks BELOW volume threshold to demonstrate filtering
+const US_STOCKS_FULL = [
+    // Mega-cap high volume (will pass $50M filter)
+    ['AAPL',220,12000e6],['MSFT',440,8500e6],['AMZN',210,9200e6],['NVDA',125,15000e6],['GOOGL',175,5500e6],
+    ['META',570,6800e6],['TSLA',250,18000e6],['AMD',115,7500e6],['NFLX',960,2100e6],['JPM',245,2800e6],
+    ['V',330,1800e6],['MA',540,1200e6],['HD',385,1500e6],['COST',960,900e6],['AVGO',190,3200e6],
+    ['CRM',310,1500e6],['ADBE',460,1400e6],['INTC',22,3800e6],['QCOM',175,2100e6],['PYPL',72,2400e6],
+    ['BA',185,3200e6],['DIS',105,2100e6],['UBER',78,2800e6],['ABNB',155,1100e6],['SQ',80,2200e6],
+    ['COIN',235,3500e6],['PLTR',95,4200e6],['SOFI',14,2800e6],['DKNG',42,1500e6],['SNAP',12,1200e6],
+    ['ROKU',82,800e6],['RIVN',14,1800e6],['NIO',4.5,1500e6],['BABA',120,2800e6],['PFE',24,2200e6],
+    ['MRNA',35,1400e6],['XOM',108,3200e6],['CVX',155,2100e6],['GS',560,1100e6],['BAC',42,4500e6],
+    ['WMT',92,1800e6],['TGT',125,1200e6],['NKE',70,1500e6],['SBUX',95,1100e6],['MCD',300,900e6],
+    ['KO',65,1200e6],['PEP',155,800e6],['JNJ',160,1100e6],['UNH',530,1500e6],['LLY',850,2200e6],
+    ['ABBV',185,1400e6],['MRK',85,1800e6],['BMY',50,900e6],['GILD',115,800e6],['AMGN',310,700e6],
+    ['REGN',780,500e6],['ISRG',530,600e6],['DXCM',78,800e6],['CRWD',370,1200e6],['PANW',195,900e6],
+    ['ZS',235,500e6],['NET',115,1100e6],['SNOW',175,800e6],['DDOG',130,700e6],['MDB',235,500e6],
+    ['SHOP',110,1400e6],['SE',115,600e6],['MELI',1850,400e6],['TTD',85,500e6],['ENPH',68,1200e6],
+    ['FSLR',185,800e6],['F',10,3500e6],['GM',48,1800e6],['DAL',52,1200e6],['AAL',14,2800e6],
+    ['CCL',22,1500e6],['T',28,2200e6],['VZ',42,1100e6],['C',70,1800e6],['WFC',72,1500e6],
+    ['SPY',570,35000e6],['QQQ',510,22000e6],['IWM',210,5500e6],['XLF',46,2200e6],['XLE',85,2800e6],
+    ['XLK',230,1800e6],['GLD',300,1200e6],['SLV',33,1500e6],['TLT',88,2200e6],['EEM',42,1800e6],
+    ['SMCI',38,3200e6],['ARM',160,2800e6],['MRVL',85,1800e6],['MU',98,2200e6],['ANET',95,800e6],
+    ['ON',42,1200e6],['LRCX',85,800e6],['KLAC',710,600e6],['AMAT',165,1500e6],['TXN',180,800e6],
+    // Medium volume (some pass, some don't)
+    ['BILL',65,180e6],['HUBS',580,220e6],['TEAM',250,300e6],['WDAY',260,350e6],['VEEV',210,200e6],
+    ['TWLO',68,280e6],['OKTA',95,250e6],['DDOG',130,700e6],['FTNT',82,600e6],['MNST',55,400e6],
+    ['ADP',280,350e6],['CDNS',280,400e6],['SNPS',520,350e6],['FICO',1800,200e6],['FAST',72,150e6],
+    // Low volume (should be FILTERED OUT by $50M threshold)
+    ['PZZA',52,15e6],['CAKE',32,12e6],['BJRI',28,8e6],['TXRH',175,25e6],['LULU',340,45e6],
+    ['ETSY',55,35e6],['PINS',32,40e6],['CHWY',28,30e6],['FVRR',25,10e6],['UPWK',14,8e6],
+    ['ASAN',18,15e6],['DOCN',35,12e6],['GTLB',52,18e6],['MQ',5,6e6],['SFIX',3,4e6],
+    ['WISH',0.5,2e6],['BYND',5,8e6],['CLOV',1.5,5e6],['IRBT',8,3e6],['NKLA',0.8,4e6],
 ];
 
-const SGX_STOCKS = [
-    ['D05.SI',42],['O39.SI',16],['U11.SI',35],['Z74.SI',3.2],['BN4.SI',7.5],['C38U.SI',2.1],['A17U.SI',2.8],
-    ['C09.SI',5.5],['U96.SI',6.2],['Y92.SI',0.55],['G13.SI',0.95],['S58.SI',3.8],['C6L.SI',7.2],['N2IU.SI',1.4],
-    ['ME8U.SI',2.5],['M44U.SI',1.6],['F34.SI',3.3],['BS6.SI',2.2],['S63.SI',4.5],['S68.SI',12.5],['V03.SI',12.8],
-    ['CC3.SI',1.2],['C52.SI',1.4],['J36.SI',58],['H78.SI',5.5],['U14.SI',6.8],
+const SGX_STOCKS_FULL = [
+    // High volume SGX (will pass 1M share filter)
+    ['D05.SI',42,8e6],['O39.SI',16,5e6],['U11.SI',35,4e6],['Z74.SI',3.2,12e6],
+    ['BN4.SI',7.5,3e6],['C38U.SI',2.1,6e6],['A17U.SI',2.8,5e6],['C6L.SI',7.2,4e6],
+    ['G13.SI',0.95,8e6],['BS6.SI',2.2,5e6],['S63.SI',4.5,3e6],['S68.SI',12.5,2e6],
+    ['F34.SI',3.3,3e6],['U96.SI',6.2,2e6],['Y92.SI',0.55,15e6],['C52.SI',1.4,4e6],
+    ['J36.SI',58,1.5e6],['H78.SI',5.5,2e6],['U14.SI',6.8,1.5e6],['V03.SI',12.8,1.2e6],
+    // Medium/Low volume SGX (some filtered out)
+    ['C09.SI',5.5,1.1e6],['S58.SI',3.8,1.5e6],['N2IU.SI',1.4,2e6],['ME8U.SI',2.5,1.8e6],
+    ['M44U.SI',1.6,3e6],['CC3.SI',1.2,2e6],
+    // Low volume - should be filtered out
+    ['9CI.SI',3.2,400e3],['A7RU.SI',2.1,300e3],['AJBU.SI',0.45,200e3],
+    ['TQ5.SI',0.8,150e3],['AWX.SI',4.5,80e3],['RE4.SI',1.65,500e3],
 ];
+
+// Apply volume filter
+const US_MIN_DOLLAR_VOL = 50e6;  // $50M daily dollar volume
+const SGX_MIN_SHARE_VOL = 1e6;   // 1M daily share volume
+
+const US_STOCKS = US_STOCKS_FULL.filter(s => s[2] >= US_MIN_DOLLAR_VOL).map(s => [s[0], s[1]]);
+const SGX_STOCKS = SGX_STOCKS_FULL.filter(s => s[2] >= SGX_MIN_SHARE_VOL).map(s => [s[0], s[1]]);
 
 // IV profiles by stock type
 function getIV(ticker, price) {
@@ -344,8 +381,13 @@ function main() {
 
     // Summary
     console.error(`\n=== OptiMax Scanner Results (SIMULATED DATA - ${SCAN_DATE}) ===`);
-    console.error(`*** DISCLAIMER: Prices are simulated via Black-Scholes. Verify with broker before trading. ***`);
-    console.error(`Total: ${results.length} opportunities from ${US_STOCKS.length + SGX_STOCKS.length} tickers\n`);
+    console.error(`*** DISCLAIMER: Prices are simulated via Black-Scholes. Verify with broker before trading. ***\n`);
+    console.error(`STEP 1 - VOLUME FILTER:`);
+    console.error(`  US Market:  ${US_STOCKS_FULL.length} total stocks → ${US_STOCKS.length} passed $${(US_MIN_DOLLAR_VOL/1e6).toFixed(0)}M daily volume filter (${US_STOCKS_FULL.length - US_STOCKS.length} filtered out)`);
+    console.error(`  SGX Market: ${SGX_STOCKS_FULL.length} total stocks → ${SGX_STOCKS.length} passed ${(SGX_MIN_SHARE_VOL/1e6).toFixed(0)}M daily share volume filter (${SGX_STOCKS_FULL.length - SGX_STOCKS.length} filtered out)`);
+    console.error(`  Combined:   ${US_STOCKS.length + SGX_STOCKS.length} stocks to scan for options\n`);
+    console.error(`STEP 2 - OPTIONS ANALYSIS:`);
+    console.error(`  ${results.length} option opportunities found across 6 strategies\n`);
     console.error('=== TOP 30 TRADE SETUPS (Highest Confidence + Gain) ===');
     console.error('═'.repeat(160));
     console.error(

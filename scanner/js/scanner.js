@@ -34,16 +34,29 @@ const Scanner = (() => {
             maxRisk = 5000,
             usUniverse = 'sp500',
             sgxUniverse = 'sti',
+            usMinDollarVolume = 50000000,   // 50M USD daily dollar volume
+            sgxMinShareVolume = 1000000,     // 1M shares daily volume
+            useScreener = true,              // Use live screener vs hardcoded
         } = filters;
 
-        // Get ticker list
+        // ===== STEP 1: Discover stocks from entire market =====
         let tickers;
-        if (market === 'US') {
-            tickers = MarketData.getTickers('US', usUniverse);
-        } else if (market === 'SGX') {
-            tickers = MarketData.getTickers('SGX', sgxUniverse);
+
+        if (useScreener) {
+            // Dynamic: Screen full market by volume, then scan options
+            if (onProgress) onProgress(0, 0, 'Screening market by volume...');
+
+            try {
+                const discovered = await API.discoverStocks(market, usMinDollarVolume, sgxMinShareVolume, 250);
+                tickers = discovered.map(s => s.ticker);
+                console.log(`Screener discovered ${tickers.length} stocks above volume threshold`);
+            } catch (e) {
+                console.warn('Screener failed, falling back to hardcoded universe:', e.message);
+                tickers = getFallbackTickers(market, usUniverse, sgxUniverse);
+            }
         } else {
-            tickers = MarketData.getTickers('ALL', usUniverse);
+            // Static: Use hardcoded lists
+            tickers = getFallbackTickers(market, usUniverse, sgxUniverse);
         }
 
         // Remove duplicates
@@ -455,6 +468,19 @@ const Scanner = (() => {
         }
 
         return results;
+    }
+
+    /**
+     * Fallback to hardcoded ticker lists when screener is unavailable
+     */
+    function getFallbackTickers(market, usUniverse, sgxUniverse) {
+        if (market === 'US') {
+            return MarketData.getTickers('US', usUniverse);
+        } else if (market === 'SGX') {
+            return MarketData.getTickers('SGX', sgxUniverse);
+        } else {
+            return MarketData.getTickers('ALL', usUniverse);
+        }
     }
 
     /**

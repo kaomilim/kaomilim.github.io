@@ -81,17 +81,51 @@ const App = (() => {
 
         // Settings
         document.getElementById('saveApiKey').addEventListener('click', saveSettings);
-        document.getElementById('dataProvider').addEventListener('change', (e) => {
+        document.getElementById('dataProvider')?.addEventListener('change', (e) => {
             API.setConfig('provider', e.target.value);
         });
-        document.getElementById('corsProxy').addEventListener('change', (e) => {
+        document.getElementById('corsProxy')?.addEventListener('change', (e) => {
             API.setConfig('corsProxy', e.target.value);
         });
-        document.getElementById('batchSize').addEventListener('change', (e) => {
-            API.setConfig('batchSize', parseInt(e.target.value) || 10);
+        document.getElementById('batchSize')?.addEventListener('change', (e) => {
+            API.setConfig('batchSize', parseInt(e.target.value) || 5);
         });
-        document.getElementById('requestDelay').addEventListener('change', (e) => {
-            API.setConfig('requestDelay', parseInt(e.target.value) || 500);
+        document.getElementById('requestDelay')?.addEventListener('change', (e) => {
+            API.setConfig('requestDelay', parseInt(e.target.value) || 600);
+        });
+
+        // Test Connection button
+        document.getElementById('testConnectionBtn')?.addEventListener('click', async () => {
+            const btn = document.getElementById('testConnectionBtn');
+            const resultDiv = document.getElementById('connectionTestResult');
+            btn.disabled = true;
+            btn.textContent = 'Testing...';
+            resultDiv.innerHTML = '<span class="spinner"></span> Testing all proxies...';
+
+            try {
+                const results = await API.testConnection();
+                let html = '<table style="width:100%;font-size:0.8rem;">';
+                html += '<tr><th style="text-align:left;">Proxy</th><th>Status</th><th>Latency</th><th>AAPL Price</th></tr>';
+                results.forEach(r => {
+                    const status = r.ok
+                        ? '<span style="color:var(--accent-green)">WORKING</span>'
+                        : '<span style="color:var(--accent-red)">FAILED</span>';
+                    html += `<tr><td>${r.name}</td><td>${status}</td><td>${r.ok ? r.latency + 'ms' : '-'}</td><td>${r.ok ? '$' + r.price : r.error || '-'}</td></tr>`;
+                });
+                html += '</table>';
+                const working = results.filter(r => r.ok);
+                if (working.length > 0) {
+                    html += `<p style="color:var(--accent-green);margin-top:0.5rem;">Using: ${working[0].name} (${working[0].latency}ms) - AAPL = $${working[0].price}</p>`;
+                } else {
+                    html += '<p style="color:var(--accent-red);margin-top:0.5rem;">All proxies failed. Try again later or use a VPN.</p>';
+                }
+                resultDiv.innerHTML = html;
+            } catch (err) {
+                resultDiv.innerHTML = `<span style="color:var(--accent-red);">Error: ${err.message}</span>`;
+            }
+
+            btn.disabled = false;
+            btn.textContent = 'Test Connection (Fetch AAPL price)';
         });
 
         // Close modals on overlay click
@@ -125,14 +159,15 @@ const App = (() => {
 
         if (state.isScanning) {
             Scanner.stop();
-            scanBtn.innerHTML = '<span class="scan-icon">&#9654;</span> Scan Market';
+            scanBtn.innerHTML = '<span class="scan-icon">&#9654;</span> Scan Entire Market';
             scanBtn.classList.remove('scanning');
             hideProgress();
             showToast('Scan stopped', 'warning');
             return;
         }
 
-        // Get filters
+        // Get filters - including volume-based market screening
+        const stockSource = document.getElementById('stockSource')?.value || 'screener';
         const filters = {
             market: currentMarket,
             strategy: document.getElementById('strategyFilter').value,
@@ -142,6 +177,9 @@ const App = (() => {
             maxRisk: parseInt(document.getElementById('maxRisk').value) || 10000,
             usUniverse: document.getElementById('usUniverse')?.value || 'sp500',
             sgxUniverse: document.getElementById('sgxUniverse')?.value || 'sti',
+            useScreener: stockSource === 'screener',
+            usMinDollarVolume: parseInt(document.getElementById('usMinDollarVolume')?.value) || 50000000,
+            sgxMinShareVolume: parseInt(document.getElementById('sgxMinShareVolume')?.value) || 1000000,
         };
 
         // UI updates
@@ -151,25 +189,35 @@ const App = (() => {
         clearResults();
         scanStartTime = Date.now();
 
+        updateStat('statFiltered', 'Screening...');
         updateStat('statScanned', '0');
         updateStat('statFound', '0');
         updateStat('statBestGain', '--');
         updateStat('statAvgIV', '--');
         updateStat('statScanTime', '--');
 
-        showToast(`Scanning ${currentMarket} market...`, 'info');
+        const srcLabel = filters.useScreener ? 'full market screener' : 'preset list';
+        const volLabel = currentMarket === 'SGX'
+            ? `${(filters.sgxMinShareVolume / 1e6).toFixed(1)}M shares`
+            : `$${(filters.usMinDollarVolume / 1e6).toFixed(0)}M`;
+        showToast(`Screening ${currentMarket} market (${srcLabel}, min vol ${volLabel})...`, 'info');
 
         let bestGain = 0;
         let totalIV = 0;
         let ivCount = 0;
+        let filteredCount = 0;
 
         try {
             const results = await Scanner.scan(
                 filters,
                 // Progress callback
                 (scanned, total, ticker) => {
-                    const pct = Math.round((scanned / total) * 100);
-                    updateProgress(pct, `Scanning ${ticker} (${scanned}/${total})`);
+                    if (total > 0 && filteredCount === 0) {
+                        filteredCount = total;
+                        updateStat('statFiltered', total.toString());
+                    }
+                    const pct = total > 0 ? Math.round((scanned / total) * 100) : 0;
+                    updateProgress(pct, `Scanning options: ${ticker} (${scanned}/${total})`);
                     updateStat('statScanned', scanned.toString());
                 },
                 // Result callback
@@ -201,7 +249,7 @@ const App = (() => {
         }
 
         // Reset button
-        scanBtn.innerHTML = '<span class="scan-icon">&#9654;</span> Scan Market';
+        scanBtn.innerHTML = '<span class="scan-icon">&#9654;</span> Scan Entire Market';
         scanBtn.classList.remove('scanning');
         hideProgress();
     }
